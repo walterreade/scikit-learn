@@ -12,8 +12,8 @@ from .base import BaseEstimator, ClassifierMixin, RegressorMixin
 from .utils import check_random_state
 from .utils.validation import check_array
 from .utils.validation import check_consistent_length
-from .utils import deprecated
 from .utils.random import random_choice_csc
+from .utils.stats import _weighted_percentile
 from .utils.multiclass import class_distribution
 
 
@@ -33,6 +33,8 @@ class DummyClassifier(BaseEstimator, ClassifierMixin):
           set's class distribution.
         * "most_frequent": always predicts the most frequent label in the
           training set.
+        * "prior": always predicts the class that maximizes the class prior
+          (like "most_frequent") and ``predict_proba`` returns the class prior.
         * "uniform": generates predictions uniformly at random.
         * "constant": always predicts a constant label that is provided by
           the user. This is useful for metrics that evaluate a non-majority
@@ -95,7 +97,7 @@ class DummyClassifier(BaseEstimator, ClassifierMixin):
             Returns self.
         """
         if self.strategy not in ("most_frequent", "stratified", "uniform",
-                                 "constant"):
+                                 "constant", "prior"):
             raise ValueError("Unknown strategy type.")
 
         if self.strategy == "uniform" and sp.issparse(y):
@@ -147,8 +149,7 @@ class DummyClassifier(BaseEstimator, ClassifierMixin):
         return self
 
     def predict(self, X):
-        """
-        Perform classification on test vectors X.
+        """Perform classification on test vectors X.
 
         Parameters
         ----------
@@ -188,15 +189,15 @@ class DummyClassifier(BaseEstimator, ClassifierMixin):
 
         if self.sparse_output_:
             class_prob = None
-            if self.strategy == "most_frequent":
+            if self.strategy in ("most_frequent", "prior"):
                 classes_ = [np.array([cp.argmax()]) for cp in class_prior_]
 
             elif self.strategy == "stratified":
                 class_prob = class_prior_
 
             elif self.strategy == "uniform":
-                    raise ValueError("Sparse target prediction is not "
-                                     "supported with the uniform strategy")
+                raise ValueError("Sparse target prediction is not "
+                                 "supported with the uniform strategy")
 
             elif self.strategy == "constant":
                 classes_ = [np.array([c]) for c in constant]
@@ -204,7 +205,7 @@ class DummyClassifier(BaseEstimator, ClassifierMixin):
             y = random_choice_csc(n_samples, classes_, class_prob,
                                   self.random_state)
         else:
-            if self.strategy == "most_frequent":
+            if self.strategy in ("most_frequent", "prior"):
                 y = np.tile([classes_[k][class_prior_[k].argmax()] for
                              k in range(self.n_outputs_)], [n_samples, 1])
 
@@ -268,6 +269,8 @@ class DummyClassifier(BaseEstimator, ClassifierMixin):
                 ind = np.ones(n_samples, dtype=int) * class_prior_[k].argmax()
                 out = np.zeros((n_samples, n_classes_[k]), dtype=np.float64)
                 out[:, ind] = 1.0
+            elif self.strategy == "prior":
+                out = np.ones((n_samples, 1)) * class_prior_[k]
 
             elif self.strategy == "stratified":
                 out = rs.multinomial(1, class_prior_[k], size=n_samples)
@@ -359,14 +362,7 @@ class DummyRegressor(BaseEstimator, RegressorMixin):
         self.constant = constant
         self.quantile = quantile
 
-    @property
-    @deprecated('This will be removed in version 0.17')
-    def y_mean_(self):
-        if self.strategy == 'mean':
-            return self.constant_
-        raise AttributeError
-
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         """Fit the random regressor.
 
         Parameters
@@ -377,6 +373,9 @@ class DummyRegressor(BaseEstimator, RegressorMixin):
 
         y : array-like, shape = [n_samples] or [n_samples, n_outputs]
             Target values.
+
+        sample_weight : array-like of shape = [n_samples], optional
+            Sample weights.
 
         Returns
         -------
@@ -389,25 +388,40 @@ class DummyRegressor(BaseEstimator, RegressorMixin):
                              "'mean', 'median', 'quantile' or 'constant'"
                              % self.strategy)
 
-        y = check_array(y, accept_sparse='csr', ensure_2d=False)
+        y = check_array(y, ensure_2d=False)
         if len(y) == 0:
             raise ValueError("y must not be empty.")
-        self.output_2d_ = (y.ndim == 2)
 
-        check_consistent_length(X, y)
+        self.output_2d_ = y.ndim == 2
+        if y.ndim == 1:
+            y = np.reshape(y, (-1, 1))
+        self.n_outputs_ = y.shape[1]
+
+        check_consistent_length(X, y, sample_weight)
 
         if self.strategy == "mean":
-            self.constant_ = np.mean(y, axis=0)
+            self.constant_ = np.average(y, axis=0, weights=sample_weight)
 
         elif self.strategy == "median":
-            self.constant_ = np.median(y, axis=0)
+            if sample_weight is None:
+                self.constant_ = np.median(y, axis=0)
+            else:
+                self.constant_ = [_weighted_percentile(y[:, k], sample_weight,
+                                                       percentile=50.)
+                                  for k in range(self.n_outputs_)]
 
         elif self.strategy == "quantile":
             if self.quantile is None or not np.isscalar(self.quantile):
                 raise ValueError("Quantile must be a scalar in the range "
                                  "[0.0, 1.0], but got %s." % self.quantile)
 
-            self.constant_ = np.percentile(y, axis=0, q=self.quantile * 100.0)
+            percentile = self.quantile * 100.0
+            if sample_weight is None:
+                self.constant_ = np.percentile(y, axis=0, q=percentile)
+            else:
+                self.constant_ = [_weighted_percentile(y[:, k], sample_weight,
+                                                       percentile=percentile)
+                                  for k in range(self.n_outputs_)]
 
         elif self.strategy == "constant":
             if self.constant is None:
@@ -416,7 +430,7 @@ class DummyRegressor(BaseEstimator, RegressorMixin):
 
             self.constant = check_array(self.constant,
                                         accept_sparse=['csr', 'csc', 'coo'],
-                                        ensure_2d=False)
+                                        ensure_2d=False, ensure_min_samples=0)
 
             if self.output_2d_ and self.constant.shape[0] != y.shape[1]:
                 raise ValueError(
@@ -426,7 +440,6 @@ class DummyRegressor(BaseEstimator, RegressorMixin):
             self.constant_ = self.constant
 
         self.constant_ = np.reshape(self.constant_, (1, -1))
-        self.n_outputs_ = np.size(self.constant_)  # y.shape[1] is not safe
         return self
 
     def predict(self, X):

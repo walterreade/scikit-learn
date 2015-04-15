@@ -5,18 +5,19 @@ import numpy as np
 from scipy import sparse
 
 from sklearn.externals.six.moves import zip
-from sklearn.utils.testing import assert_raises
+from sklearn.utils.testing import assert_raises, assert_raises_regex
 from sklearn.utils.testing import assert_equal
 from sklearn.utils.testing import assert_false
 from sklearn.utils.testing import assert_true
 from sklearn.utils.testing import assert_array_equal
 from sklearn.utils.testing import assert_array_almost_equal
 
-from sklearn.base import BaseEstimator, clone
+from sklearn.base import clone
 from sklearn.pipeline import Pipeline, FeatureUnion, make_pipeline, make_union
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.linear_model import LinearRegression
+from sklearn.cluster import KMeans
 from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.decomposition import PCA, RandomizedPCA, TruncatedSVD
 from sklearn.datasets import load_iris
@@ -34,7 +35,7 @@ JUNK_FOOD_DOCS = (
 )
 
 
-class IncorrectT(BaseEstimator):
+class IncorrectT(object):
     """Small class to test parameter dispatching.
     """
 
@@ -48,6 +49,13 @@ class T(IncorrectT):
     def fit(self, X, y):
         return self
 
+    def get_params(self, deep=False):
+        return {'a': self.a, 'b': self.b}
+
+    def set_params(self, **params):
+        self.a = params['a']
+        return self
+
 
 class TransfT(T):
 
@@ -55,7 +63,7 @@ class TransfT(T):
         return X
 
 
-class FitParamT(BaseEstimator):
+class FitParamT(object):
     """Mock classifier
     """
 
@@ -71,8 +79,7 @@ class FitParamT(BaseEstimator):
 
 
 def test_pipeline_init():
-    """ Test the various init parameters of the pipeline.
-    """
+    # Test the various init parameters of the pipeline.
     assert_raises(TypeError, Pipeline)
     # Check that we can't instantiate pipelines with objects without fit
     # method
@@ -86,6 +93,7 @@ def test_pipeline_init():
     # Check that params are set
     pipe.set_params(svc__a=0.1)
     assert_equal(clf.a, 0.1)
+    assert_equal(clf.b, None)
     # Smoke test the repr:
     repr(pipe)
 
@@ -122,8 +130,7 @@ def test_pipeline_init():
 
 
 def test_pipeline_methods_anova():
-    """ Test the various methods of the pipeline (anova).
-    """
+    # Test the various methods of the pipeline (anova).
     iris = load_iris()
     X = iris.data
     y = iris.target
@@ -139,8 +146,7 @@ def test_pipeline_methods_anova():
 
 
 def test_pipeline_fit_params():
-    """Test that the pipeline can take fit parameters
-    """
+    # Test that the pipeline can take fit parameters
     pipe = Pipeline([('transf', TransfT()), ('clf', FitParamT())])
     pipe.fit(X=None, y=None, clf__should_succeed=True)
     # classifier should return True
@@ -151,7 +157,7 @@ def test_pipeline_fit_params():
 
 
 def test_pipeline_methods_pca_svm():
-    """Test the various methods of the pipeline (pca + svm)."""
+    # Test the various methods of the pipeline (pca + svm).
     iris = load_iris()
     X = iris.data
     y = iris.target
@@ -167,7 +173,7 @@ def test_pipeline_methods_pca_svm():
 
 
 def test_pipeline_methods_preprocessing_svm():
-    """Test the various methods of the pipeline (preprocessing + svm)."""
+    # Test the various methods of the pipeline (preprocessing + svm).
     iris = load_iris()
     X = iris.data
     y = iris.target
@@ -195,6 +201,36 @@ def test_pipeline_methods_preprocessing_svm():
         assert_equal(decision_function.shape, (n_samples, n_classes))
 
         pipe.score(X, y)
+
+
+def test_fit_predict_on_pipeline():
+    # test that the fit_predict method is implemented on a pipeline
+    # test that the fit_predict on pipeline yields same results as applying
+    # transform and clustering steps separately
+    iris = load_iris()
+    scaler = StandardScaler()
+    km = KMeans(random_state=0)
+
+    # first compute the transform and clustering step separately
+    scaled = scaler.fit_transform(iris.data)
+    separate_pred = km.fit_predict(scaled)
+
+    # use a pipeline to do the transform and clustering in one step
+    pipe = Pipeline([('scaler', scaler), ('Kmeans', km)])
+    pipeline_pred = pipe.fit_predict(iris.data)
+
+    assert_array_almost_equal(pipeline_pred, separate_pred)
+
+
+def test_fit_predict_on_pipeline_without_fit_predict():
+    # tests that a pipeline does not have fit_predict method when final
+    # step of pipeline does not have fit_predict defined
+    scaler = StandardScaler()
+    pca = PCA()
+    pipe = Pipeline([('scaler', scaler), ('pca', pca)])
+    assert_raises_regex(AttributeError,
+                        "'PCA' object has no attribute 'fit_predict'",
+                        getattr, pipe, 'fit_predict')
 
 
 def test_feature_union():
