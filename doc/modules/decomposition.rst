@@ -23,12 +23,12 @@ scikit-learn, :class:`PCA` is implemented as a *transformer* object
 that learns :math:`n` components in its ``fit`` method, and can be used on new
 data to project it on these components.
 
-The optional parameter ``whiten=True`` parameter make it possible to
+The optional parameter ``whiten=True`` makes it possible to
 project the data onto the singular space while scaling each component
 to unit variance. This is often useful if the models down-stream make
 strong assumptions on the isotropy of the signal: this is for example
 the case for Support Vector Machines with the RBF kernel and the K-Means
-clustering algorithm. 
+clustering algorithm.
 
 Below is an example of the iris dataset, which is comprised of 4
 features, projected on the 2 dimensions that explain most variance:
@@ -61,13 +61,13 @@ data based on the amount of variance it explains. As such it implements a
 Incremental PCA
 ---------------
 
-The :class:`PCA` object is very useful, but has certain limitations for 
-large datasets. The biggest limitation is that :class:`PCA` only supports 
+The :class:`PCA` object is very useful, but has certain limitations for
+large datasets. The biggest limitation is that :class:`PCA` only supports
 batch processing, which means all of the data to be processed must fit in main
 memory. The :class:`IncrementalPCA` object uses a different form of
 processing and allows for partial computations which almost
 exactly match the results of :class:`PCA` while processing the data in a
-minibatch fashion. :class:`IncrementalPCA` makes it possible to implement 
+minibatch fashion. :class:`IncrementalPCA` makes it possible to implement
 out-of-core Principal Component Analysis either by:
 
  * Using its ``partial_fit`` method on chunks of data fetched sequentially
@@ -77,7 +77,7 @@ out-of-core Principal Component Analysis either by:
 
 :class:`IncrementalPCA` only stores estimates of component and noise variances,
 in order update ``explained_variance_ratio_`` incrementally. This is why
-memory usage depends on the number of samples per batch, rather than the 
+memory usage depends on the number of samples per batch, rather than the
 number of samples to be processed in the dataset.
 
 .. figure:: ../auto_examples/decomposition/images/plot_incremental_pca_001.png
@@ -176,8 +176,8 @@ Kernel PCA
 ----------
 
 :class:`KernelPCA` is an extension of PCA which achieves non-linear
-dimensionality reduction through the use of kernels (see :ref:`metrics`). It 
-has many applications including denoising, compression and structured 
+dimensionality reduction through the use of kernels (see :ref:`metrics`). It
+has many applications including denoising, compression and structured
 prediction (kernel dependency estimation). :class:`KernelPCA` supports both
 ``transform`` and ``inverse_transform``.
 
@@ -451,7 +451,7 @@ sparse coding step that shares the same implementation with all dictionary
 learning objects (see :ref:`SparseCoder`).
 
 The following image shows how a dictionary learned from 4x4 pixel image patches
-extracted from part of the image of Lena looks like.
+extracted from part of the image of a raccoon face looks like.
 
 
 .. figure:: ../auto_examples/decomposition/images/plot_image_denoising_001.png
@@ -656,12 +656,12 @@ into two matrices :math:`W` and :math:`H` of non-negative elements,
 by optimizing for the squared Frobenius norm:
 
 .. math::
-    \arg\min_{W,H} ||X - WH||^2 = \sum_{i,j} X_{ij} - {WH}_{ij}
+    \arg\min_{W,H} \frac{1}{2} ||X - WH||_{Fro}^2 = \frac{1}{2} \sum_{i,j} (X_{ij} - {WH}_{ij})^2
 
-This norm is an obvious extension of the Euclidean norm to matrices.
-(Other optimization objectives have been suggested in the NMF literature,
-in particular Kullback-Leibler divergence,
-but these are not currently implemented.)
+This norm is an obvious extension of the Euclidean norm to matrices. (Other
+optimization objectives have been suggested in the NMF literature, in
+particular Kullback-Leibler divergence, but these are not currently
+implemented.)
 
 Unlike :class:`PCA`, the representation of a vector is obtained in an additive
 fashion, by superimposing the components, without subtracting. Such additive
@@ -695,13 +695,34 @@ the mean of all elements of the data), and NNDSVDar (in which the zeros are set
 to random perturbations less than the mean of the data divided by 100) are
 recommended in the dense case.
 
-:class:`NMF` can also be initialized with random non-negative matrices, by
-passing an integer seed or a ``RandomState`` to :attr:`init`.
+:class:`NMF` can also be initialized with correctly scaled random non-negative
+matrices by setting :attr:`init="random"`. An integer seed or a
+``RandomState`` can also be passed to :attr:`random_state` to control
+reproducibility.
 
-In :class:`NMF`, sparseness can be enforced by setting the attribute
-:attr:`sparseness` to ``"data"`` or ``"components"``. Sparse components lead to
-localized features, and sparse data leads to a more efficient representation of
-the data.
+In :class:`NMF`, L1 and L2 priors can be added to the loss function in order
+to regularize the model. The L2 prior uses the Frobenius norm, while the L1
+prior uses an elementwise L1 norm. As in :class:`ElasticNet`, we control the
+combination of L1 and L2 with the :attr:`l1_ratio` (:math:`\rho`) parameter,
+and the intensity of the regularization with the :attr:`alpha`
+(:math:`\alpha`) parameter. Then the priors terms are:
+
+.. math::
+    \alpha \rho ||W||_1 + \alpha \rho ||H||_1
+    + \frac{\alpha(1-\rho)}{2} ||W||_{Fro} ^ 2
+    + \frac{\alpha(1-\rho)}{2} ||H||_{Fro} ^ 2
+
+and the regularized objective function is:
+
+.. math::
+    \frac{1}{2}||X - WH||_{Fro}^2
+    + \alpha \rho ||W||_1 + \alpha \rho ||H||_1
+    + \frac{\alpha(1-\rho)}{2} ||W||_{Fro} ^ 2
+    + \frac{\alpha(1-\rho)}{2} ||H||_{Fro} ^ 2
+
+:class:`NMF` regularizes both W and H. The public function
+:func:`non_negative_factorization` allows a finer control through the
+:attr:`regularization` attribute, and may regularize only W, only H, or both.
 
 .. topic:: Examples:
 
@@ -727,6 +748,11 @@ the data.
       <http://scgroup.hpclab.ceid.upatras.gr/faculty/stratis/Papers/HPCLAB020107.pdf>`_
       C. Boutsidis, E. Gallopoulos, 2008
 
+    * `"Fast local algorithms for large scale nonnegative matrix and tensor
+      factorizations."
+      <http://www.bsp.brain.riken.jp/publications/2009/Cichocki-Phan-IEICE_col.pdf>`_
+      A. Cichocki, P. Anh-Huy, 2009
+
 
 .. _LatentDirichletAllocation:
 
@@ -750,6 +776,7 @@ a corpus with :math:`D` documents and :math:`K` topics:
   2. For each document :math:`d`, draw :math:`\theta_d \sim Dirichlet(\alpha), \: d=1...D`
 
   3. For each word :math:`i` in document :math:`d`:
+
     a. Draw a topic index :math:`z_{di} \sim Multinomial(\theta_d)`
     b. Draw the observed word :math:`w_{ij} \sim Multinomial(beta_{z_{di}}.)`
 
@@ -768,7 +795,7 @@ to approximate it, and those variational parameters :math:`\lambda`, :math:`\phi
   log\: P(w | \alpha, \eta) \geq L(w,\phi,\gamma,\lambda) \overset{\triangle}{=}
     E_{q}[log\:p(w,z,\theta,\beta|\alpha,\eta)] - E_{q}[log\:q(z, \theta, \beta)]
 
-Maximizing ELBO is equivalent to minimizing the Kullback-Leibler(KL) divergence 
+Maximizing ELBO is equivalent to minimizing the Kullback-Leibler(KL) divergence
 between :math:`q(z,\theta,\beta)` and the true posterior
 :math:`p(z, \theta, \beta |w, \alpha, \eta)`.
 
